@@ -20,24 +20,6 @@ as a container, driven by docker compose. Nothing is installed on the host itsel
 than part of one application. It matches `traefikd_host_proxy`, which terminates TLS for
 the same host.
 
-## Status
-
-Not built yet. The plan lives in the issues of this repo:
-
-- **[Shared Postgres engine for a docker host](../../issues/1)** — the map. Read it first.
-- Its child issues are the open decisions. Take one from the frontier: an open issue with
-  nothing blocking it.
-
-## Keep this repo generic
-
-This repo is **public**. Every concrete value — the domain, the subdomains, the AWS
-account, the bucket names, the host address, the certificate email, every credential —
-belongs in `.env`, which is gitignored, or in private notes.
-
-Never commit a real domain, subdomain, bucket name, host address, email, or account
-identifier. Use `example.com` and a `${VARIABLE}` placeholder. The same rule applies to
-the issues.
-
 ## Usage
 
 Written once the stack exists. See **[Build the engine repo and start the
