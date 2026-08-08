@@ -1,0 +1,77 @@
+# PostgREST template — copy this into the CONSUMER's repo, not into this one.
+#
+# One PostgREST process serves exactly ONE database. A database belongs to one
+# tenant, and a tenant is one consumer compose project — so the process belongs
+# to the tenant. This repo owns the template and the role recipe; it runs no
+# PostgREST of its own.
+#
+# The roles come from provisioning, and only the engine can make them:
+#
+#     make add-tenant NAME=<name> WITH_API=1
+#
+# That prints PGRST_DB_URI, creates the `api` schema, the authenticator and the
+# anonymous role, and installs the pgrst_watch event trigger — an event trigger
+# is a superuser-only object, so the tenant cannot install it itself.
+#
+# What to change: the service name, PGRST_DB_URI, PGRST_JWT_SECRET, and the
+# subdomain in the labels.
+
+services:
+  postgrest:
+    image: postgrest/postgrest:v14.16
+    restart: unless-stopped
+    environment:
+      # From `make add-tenant NAME=<name> WITH_API=1`. Keep it in this repo's
+      # own gitignored .env.
+      #
+      # DIRECT to postgres:5432, never to `engine` or `engine-session`.
+      # PostgREST has its own pool, and transaction pooling breaks its LISTEN
+      # schema reload SILENTLY — the log line still says it is listening.
+      PGRST_DB_URI: ${PGRST_DB_URI}
+      PGRST_DB_SCHEMAS: api
+      PGRST_DB_ANON_ROLE: ${PGRST_ANON_ROLE}
+
+      # At least 32 characters. One value for one process, so it cannot differ
+      # per project — which is the reason each project runs its own container.
+      # A leading `@` loads it from a file instead.
+      PGRST_JWT_SECRET: ${PGRST_JWT_SECRET}
+
+      # Both are needed by the `--ready` health check below. Binding the admin
+      # server to localhost keeps /ready, /live, /metrics and — importantly —
+      # /schema_cache off the docker network. /schema_cache dumps the whole
+      # database structure.
+      PGRST_ADMIN_SERVER_PORT: "3001"
+      PGRST_ADMIN_SERVER_HOST: localhost
+
+      # Otherwise the OpenAPI document at / advertises the bind address rather
+      # than the public URL.
+      PGRST_OPENAPI_SERVER_PROXY_URI: https://api.example.com
+    healthcheck:
+      # The image holds ONE binary and no shell, so there is no curl and no
+      # wget to call. Use the built-in flag.
+      test: ["CMD", "/bin/postgrest", "--ready"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    mem_limit: 256m
+    memswap_limit: 256m
+    networks:
+      - default
+      - postgres_host_network
+      - traefik_host_network
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.postgrest-public.rule=Host(`api.example.com`)"
+      - "traefik.http.routers.postgrest-public.entrypoints=web"
+      - "traefik.http.routers.postgrest-public.middlewares=force-secure@docker"
+      - "traefik.http.routers.postgrest-secure.rule=Host(`api.example.com`)"
+      - "traefik.http.routers.postgrest-secure.entrypoints=websecure"
+      - "traefik.http.routers.postgrest-secure.tls.certresolver=${RESOLVER_NAME}"
+      - "traefik.http.services.postgrest.loadbalancer.server.port=3000"
+      - "traefik.docker.network=traefik_host_network"
+
+networks:
+  postgres_host_network:
+    external: true
+  traefik_host_network:
+    external: true
