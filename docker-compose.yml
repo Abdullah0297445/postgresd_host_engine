@@ -22,13 +22,12 @@ services:
       PGBOUNCER_AUTH_PASSWORD: ${PGBOUNCER_AUTH_PASSWORD}
     command:
       - postgres
-      # 25% of THIS CONTAINER's mem_limit, not of the box. Context is
-      # postmaster, so a change here costs a restart, and a restart of the
-      # engine drops every tenant at the same time.
+      # 25% of this container's mem_limit. Context is postmaster, so a change
+      # here needs a restart, which takes every tenant down at once.
       - "-c"
       - "shared_buffers=1GB"
-      # The sum of what reaches Postgres: 25 session pool + 60 transaction pool
-      # + 10 PostgREST + 5 pgadmin + 5 backup + 3 reserved = 93, plus headroom.
+      # Must cover both doors' server connections plus everything that bypasses
+      # them — pgadmin, the backup, and any PostgREST — with headroom on top.
       - "-c"
       - "max_connections=120"
       # One global law. A session that needs more raises it itself with
@@ -38,8 +37,8 @@ services:
       - "work_mem=4MB"
       - "-c"
       - "maintenance_work_mem=256MB"
-      # Set on its own. Left at -1 it follows maintenance_work_mem, so 256MB
-      # would become 768MB across three workers and break the memory budget.
+      # Set on its own. Left at -1 it follows maintenance_work_mem, so the value
+      # above would be taken again by every autovacuum worker.
       - "-c"
       - "autovacuum_work_mem=64MB"
       - "-c"
@@ -67,9 +66,9 @@ services:
       start_period: 30s
     mem_limit: 4g
     memswap_limit: 4g
-    # Postgres 18 still fails a parallel hash join on docker's default 64MB
-    # /dev/shm. This is a cap, not a reservation, so it costs nothing until a
-    # parallel query uses it.
+    # Postgres 18 fails a parallel hash join on docker's default 64MB /dev/shm.
+    # This is a cap, not a reservation, so it costs nothing until a parallel
+    # query uses it.
     shm_size: 256m
     networks:
       - default
@@ -212,9 +211,9 @@ services:
     memswap_limit: 512m
     labels:
       - "traefik.enable=true"
-      # Generate the hash with `htpasswd -nbB <user> <password>`. Compose does
-      # not re-scan a variable's VALUE for `$`, so a bcrypt hash passes through
-      # whole and needs no `$$` escaping. Never write a hash literally here.
+      # The hash comes from PGADMIN_BASIC_AUTH in .env, where every `$` must be
+      # doubled or the value is truncated — see .env.example for why. Never
+      # write a hash literally here.
       - "traefik.http.middlewares.pgadmin-auth.basicauth.users=${PGADMIN_BASIC_AUTH}"
       - "traefik.http.middlewares.pgadmin-auth.basicauth.removeheader=true"
       - "traefik.http.routers.pgadmin-public.rule=Host(`${PGADMIN_HOST}`)"
@@ -291,7 +290,7 @@ networks:
   postgres_host_network:
     name: postgres_host_network
     external: true
-  # Created by traefikd_host_proxy.
+  # Created by the host's reverse proxy stack, not by this one.
   traefik_host_network:
     name: traefik_host_network
     external: true

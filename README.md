@@ -22,19 +22,20 @@ another compose project joins that network by name and connects over it.
 `postgresd_host_engine` — the **`d`** marks a **docker**-only deployment. Postgres runs
 as a container, driven by docker compose. Nothing is installed on the host itself.
 
-`_host_` marks it as host-wide infrastructure, shared by every stack on the box, rather
-than part of one application. It matches `traefikd_host_proxy`, which terminates TLS for
-the same host.
+`_host_` marks it as host-wide infrastructure, shared by every stack on the host, rather
+than part of one application. It pairs with a separate host-wide reverse proxy, which
+terminates TLS.
 
 ## Usage
 
 1. `cp .env.example .env`
 2. Make appropriate changes to the values in the `.env` file. Every password must change.
-3. Confirm `.gitignore` excludes `.env` **before** the first commit. This repo is public.
+3. Confirm `.gitignore` excludes `.env` **before** the first commit.
 4. Create the docker network by running this command in your terminal:
    `docker network create postgres_host_network`
-5. `traefikd_host_proxy` must already be running, so that `traefik_host_network` exists
-   and `${PGADMIN_HOST}` has a DNS A record pointing at this host.
+5. A traefik reverse proxy must already be running on this host, so that
+   `traefik_host_network` exists, and `${PGADMIN_HOST}` must have a DNS A record pointing
+   at the host.
 6. `docker compose up -d`
 7. `docker compose ps` — every container must reach a healthy state, and none may show a
    host port binding.
@@ -76,8 +77,8 @@ never touches pgbouncer.
 
 **A tenant on the session door must keep `CONN_MAX_AGE = 0`.** That door holds one engine
 connection for as long as the tenant holds its own. Raise it and each thread pins a server
-connection, the pool exhausts, and requests block. This is why 200 Django threads can run
-against a pool of 25: `CONN_MAX_AGE = 0` makes a session one request long.
+connection, the pool exhausts, and requests block. `CONN_MAX_AGE = 0` makes a session one
+request long, which is how many application threads can share a much smaller pool.
 
 Both doors listen on port **5432**, so no tenant ever writes a port. If a tenant fails on
 the transaction door, move its DSN to `engine-session` — that is a DSN change, not an
@@ -171,17 +172,18 @@ The engine does not carry a large value all day to serve an occasional restore.
 
 ### Memory
 
-The engine takes **5 GB across all five containers**, and Postgres takes **4 GB** of that.
-Every container has a `mem_limit` and a matching `memswap_limit`, so **nothing swaps** — a
-database that swaps is slower than one that is down, and it stays "up" while it drags its
-neighbours with it. There is no `cpus` limit anywhere; parallelism is capped inside
-Postgres with `max_parallel_workers` instead.
+The engine takes **5 GB across all five containers**, and Postgres takes **4 GB** of that —
+size both against the host you run on. Every container has a `mem_limit` and a matching
+`memswap_limit`, so **nothing swaps** — a database that swaps is slower than one that is
+down, and it stays "up" while it drags its neighbours with it. There is no `cpus` limit
+anywhere; parallelism is capped inside Postgres with `max_parallel_workers` instead.
 
-`shared_buffers` is 1GB, which is 25% of the **container limit** — not of the box. The
-priced worst case at 120 connections sits 487 MiB under the limit.
+`shared_buffers` is 1GB, which is 25% of the **container limit** rather than of the host's
+memory. Before raising either, price the worst case: `shared_buffers`, plus `work_mem` and
+the per-backend overhead at `max_connections`, must still fit under `mem_limit`.
 
-Only Postgres takes a `shm_size`, at `256m`. Postgres 18 still fails a parallel hash join
-on docker's default 64 MB `/dev/shm`. It is a cap, not a reservation.
+Only Postgres takes a `shm_size`, at `256m`. Postgres 18 fails a parallel hash join on
+docker's default 64 MB `/dev/shm`. It is a cap, not a reservation.
 
 Settings travel as compose `command:` flags, never as a mounted `postgresql.conf`. The
 image writes its own conf into the volume at first start, so a mounted file would have to
@@ -224,17 +226,17 @@ the compose `default` network only, so it cannot take a pooled path by accident.
 ### Blast radius
 
 When the engine stops, **every** tenant loses its database at once, and any restart to
-change `shared_buffers` takes them all down together. This is accepted: the box is already
+change `shared_buffers` takes them all down together. The trade is that the host is already
 the failure domain — one host, one docker daemon — so a shared engine adds no new single
 point of failure. Two conditions hold it there: keep this compose file small, so restarts
 stay rare, and hold nothing in the engine except tenant databases.
 
 ## Notes
 
-- This repo is **public**. Every concrete value — the domain, the subdomains, the AWS
-  account, the bucket name, the host address — lives in `.env`, which is gitignored. Never
-  write a real domain, bucket name, host address, email, or account identifier into this
-  repo.
+- **Every concrete value stays out of git.** The domain, the subdomains, the cloud
+  account, the bucket name and the host address all live in `.env`, which is gitignored, so
+  this repo can be published without redaction. Never write a real domain, bucket name,
+  host address, email, or account identifier into it.
 - pgadmin registers exactly **one** server, this engine, from a checked-in
   `pgadmin/servers.json` with `PGADMIN_REPLACE_SERVERS_ON_STARTUP=True`. The repo wins at
   every start, so a server you add by hand does not survive a restart. It logs in as the
@@ -243,4 +245,4 @@ stay rare, and hold nothing in the engine except tenant databases.
   locks: a traefik `basicauth` middleware on the `-secure` router, and its own login. Its
   image floats on `latest` on purpose, so security fixes arrive without review. Its volume
   needs no backup — it holds one server definition and no password.
-- `${RESOLVER_NAME}` must match the value in the `traefikd_host_proxy` `.env`.
+- `${RESOLVER_NAME}` must match the certificate resolver the reverse proxy defines.

@@ -84,12 +84,3 @@ _Avoid_: service account, api user
 The role a PostgREST request takes when it carries no valid token. It cannot log in
 directly.
 _Avoid_: public role, guest
-
-## Names used for the two pre-existing services
-
-Both keep their own engines, and neither joins this one. They are named by their Postgres
-major version, never by project name, because this repo is public.
-
-**The PG 15 service** — the older of the two.
-
-**The PG 17 service** — the newer of the two. It runs its own pgadmin.

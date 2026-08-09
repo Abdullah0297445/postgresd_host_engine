@@ -23,7 +23,7 @@ die() { echo "add-tenant: $1" >&2; exit 1; }
 # verbatim as the database name and as the role name: no prefix, no suffix, and
 # no letter removed. It is checked here only because it goes straight into SQL
 # identifiers.
-[ -n "$NAME" ] || die "NAME is required. Try: make add-tenant NAME=n8nd"
+[ -n "$NAME" ] || die "NAME is required. Try: make add-tenant NAME=myapp"
 
 case "$NAME" in
   *[!a-z0-9_]*) die "'$NAME' is not a valid name. Use lower case a-z, 0-9 and _ only." ;;
