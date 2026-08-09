@@ -139,7 +139,20 @@ SQL
 fi
 
 # --- 8. Print the DSN -----------------------------------------------------
-if [ -n "$SESSION" ]; then DOOR="engine-session"; else DOOR="engine"; fi
+#
+# WITH_API prints TWO connection strings, and they are NOT interchangeable: one
+# goes through a door, the other must not. Pasting the tenant DSN where
+# PGRST_DB_URI belongs puts PostgREST behind a pooler, and nothing tells you —
+# the container starts, reports healthy, and /ready still answers 200, while the
+# LISTEN schema reload is broken. So each string says which path it takes, on
+# the line above the string itself.
+if [ -n "$SESSION" ]; then
+  DOOR="engine-session"
+  DOOR_NAME="SESSION door"
+else
+  DOOR="engine"
+  DOOR_NAME="TRANSACTION door"
+fi
 
 echo
 echo "Tenant '$NAME' is provisioned."
@@ -150,6 +163,7 @@ echo "    networks:"
 echo "      postgres_host_network:"
 echo "        external: true"
 echo
+echo "  FOR THE APPLICATION. Through the ${DOOR_NAME}, which is pgbouncer."
 echo "  Paste this into the consumer repo's own gitignored .env:"
 echo
 echo "    DATABASE_URL=postgresql://${NAME}:${PASSWORD}@${DOOR}:5432/${NAME}"
@@ -167,14 +181,21 @@ fi
 
 if [ -n "$WITH_API" ]; then
   cat <<API
-  PostgREST roles are installed: schema 'api', authenticator
-  '${AUTHENTICATOR}', anonymous role '${ANON}'.
+  FOR POSTGREST. DIRECT to the engine, and NOT through a door.
+  Paste this into the consumer repo's own gitignored .env:
 
     PGRST_DB_URI=postgres://${AUTHENTICATOR}:${API_PASSWORD}@postgres:5432/${NAME}
 
-  PostgREST connects DIRECT to postgres and never through a door: transaction
-  pooling breaks its LISTEN schema reload silently. Copy the service block from
-  templates/postgrest.compose.yml into the consumer's repo.
+  Roles installed: schema 'api', authenticator '${AUTHENTICATOR}', anonymous
+  role '${ANON}'. Copy the service block from templates/postgrest.compose.yml
+  into the consumer's repo.
+
+  THE TWO STRINGS ABOVE ARE NOT INTERCHANGEABLE.
+  DATABASE_URL names '${DOOR}', which is a pooler. PGRST_DB_URI names
+  'postgres', and it must never name a door: transaction pooling breaks
+  PostgREST's LISTEN schema reload silently, and every health check still
+  passes, so a wrong paste looks exactly like a right one. Before you paste
+  PGRST_DB_URI, check that it holds '_authenticator' and '@postgres'.
 
 API
 fi
