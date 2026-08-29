@@ -1,13 +1,4 @@
 #!/bin/bash
-# Installs the pgbouncer lookup role and its auth_query function.
-#
-# This runs ONLY on an empty volume, because that is when the engine is born.
-# It is engine machinery and it names no tenant, so it is safe here. Nothing
-# tenant-related ever goes into /docker-entrypoint-initdb.d — provisioning must
-# take the same path for the first tenant and for the fourth.
-#
-# It is written to be safe to re-run by hand against a live engine. See the
-# README, "Rotating the pgbouncer lookup role".
 set -euo pipefail
 
 if [ -z "${PGBOUNCER_AUTH_USER:-}" ] || [ -z "${PGBOUNCER_AUTH_PASSWORD:-}" ]; then

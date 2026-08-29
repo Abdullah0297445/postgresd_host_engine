@@ -1,18 +1,6 @@
 #! /bin/sh
-# The engine backup. Mounted over /backup.sh in siemens/postgres-backup-s3:18,
-# which supplies the S3 client, the scheduler and pg_dump 18.4 that the engine
-# image lacks. The image's run.sh execs `go-cron "$SCHEDULE" /bin/sh backup.sh`
-# from /, and that is the whole dependency on it.
-#
-# It writes ONE archive for each tenant database, plus ONE globals file for the
-# engine. It never names a database to include — it reads pg_database — so a new
-# tenant needs no change here and no compose change anywhere.
-#
-# It deliberately does NOT source the image's ./env.sh: that file exits 1 when
-# POSTGRES_DATABASE is unset, and this script has no single database.
 set -u
 
-# --- Environment ----------------------------------------------------------
 for v in POSTGRES_HOST POSTGRES_USER POSTGRES_PASSWORD S3_BUCKET S3_REGION PASSPHRASE; do
   eval "value=\${$v:-}"
   if [ -z "$value" ]; then
@@ -35,8 +23,6 @@ trap 'rm -rf "$WORK"' EXIT INT TERM
 FAILED=0
 DUMPED=0
 
-# Encrypt, upload, and keep NO copy on the host disk. A local copy dies with the
-# host, which is the failure the backup exists for.
 ship() {
   _src="$1"; _key="$2"
   gpg --symmetric --batch --yes --passphrase "$PASSPHRASE" \
@@ -47,12 +33,6 @@ ship() {
   return 0
 }
 
-# --- The set --------------------------------------------------------------
-#
-# datistemplate drops template1; datallowconn drops template0. Everything else
-# is a tenant database unless the operator excluded it by name.
-# The query goes in on STDIN, not through -c. psql does NOT interpolate a
-# :'variable' inside -c, so the exclusion list would reach the server literally.
 echo "engine-backup: reading pg_database from ${POSTGRES_HOST}:${PORT}"
 if ! psql -tAX -v ON_ERROR_STOP=1 --no-psqlrc \
        -h "$POSTGRES_HOST" -p "$PORT" -U "$POSTGRES_USER" -d postgres \
@@ -71,8 +51,6 @@ fi
 
 COUNT="$(grep -c . "$WORK/databases" || true)"
 
-# An empty set looks exactly like a clean run, and it is the worst failure of
-# the lot. It is also how a database that silently leaves the set breaks the run.
 if [ "$COUNT" -eq 0 ]; then
   echo "engine-backup: pg_database returned NO databases to back up. Refusing to report success." >&2
   echo "engine-backup: exclusions in force: ${EXCLUDE}" >&2
@@ -81,9 +59,6 @@ fi
 
 echo "engine-backup: ${COUNT} database(s) to back up. Exclusions: ${EXCLUDE}"
 
-# --- One archive for each database ---------------------------------------
-#
-# Each database is a separate step. One failure must not stop the rest.
 while IFS= read -r db; do
   [ -n "$db" ] || continue
   echo "engine-backup: dumping '${db}'"
@@ -105,13 +80,6 @@ while IFS= read -r db; do
   echo "engine-backup: uploaded ${db}/${TIMESTAMP}.dump.gpg"
 done < "$WORK/databases"
 
-# --- The globals, once for each run --------------------------------------
-#
-# A tenant role is a CLUSTER object, so pg_dump does not carry it. Restore an
-# archive into an engine that holds no roles and it fails on the first
-# `ALTER TABLE ... OWNER TO`. This file carries the SCRAM verifier of every
-# tenant in one object, which is why the encryption above is mandatory and not
-# merely prudent.
 echo "engine-backup: dumping globals"
 if ! pg_dumpall -h "$POSTGRES_HOST" -p "$PORT" -U "$POSTGRES_USER" --globals-only \
       > "$WORK/globals.sql"; then
@@ -124,13 +92,6 @@ else
   echo "engine-backup: uploaded globals/${TIMESTAMP}.sql.gpg"
 fi
 
-# --- The verdict ----------------------------------------------------------
-#
-# Retention is a 30-day S3 lifecycle rule on the bucket, not code here. The IAM
-# user holds no s3:DeleteObject, so nothing below can erase a backup.
-#
-# NOBODY IS TOLD. Until the engine has monitoring, a failure is found by reading
-# `docker logs engine-backup`.
 if [ "$FAILED" -gt 0 ]; then
   echo "engine-backup: ${DUMPED} of ${COUNT} database(s) backed up, ${FAILED} step(s) FAILED." >&2
   exit 1

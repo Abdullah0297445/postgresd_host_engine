@@ -1,14 +1,4 @@
 #!/bin/sh
-# Provisioning: add a tenant to a RUNNING engine.
-#
-# The first tenant and the fourth take exactly this path. Nothing here is
-# special-cased, and nothing here touches pgbouncer.
-#
-#   make add-tenant NAME=<name>
-#   make add-tenant NAME=<name> SESSION=1     # DSN names the session door
-#   make add-tenant NAME=<name> WITH_API=1    # also builds the PostgREST roles
-#
-# It is safe to run again. An existing tenant makes it STOP, not overwrite.
 set -eu
 
 NAME="${NAME:-}"
@@ -17,20 +7,12 @@ SESSION="${SESSION:-}"
 
 die() { echo "add-tenant: $1" >&2; exit 1; }
 
-# --- 1. Validate the name -------------------------------------------------
-#
-# A validity check, never a transformation. The name the consumer gives is used
-# verbatim as the database name and as the role name: no prefix, no suffix, and
-# no letter removed. It is checked here only because it goes straight into SQL
-# identifiers.
 [ -n "$NAME" ] || die "NAME is required. Try: make add-tenant NAME=myapp"
 
 case "$NAME" in
   *[!a-z0-9_]*) die "'$NAME' is not a valid name. Use lower case a-z, 0-9 and _ only." ;;
 esac
 
-# Postgres truncates an identifier past 63 bytes SILENTLY, which would rename
-# the tenant behind your back. Refuse instead.
 [ "$(printf %s "$NAME" | wc -c)" -le 63 ] || die "'$NAME' is longer than 63 characters."
 
 AUTHENTICATOR="${NAME}_authenticator"
@@ -39,11 +21,6 @@ if [ -n "$WITH_API" ] && [ "$(printf %s "$AUTHENTICATOR" | wc -c)" -gt 63 ]; the
   die "'$NAME' is too long for WITH_API: the role '$AUTHENTICATOR' would exceed 63 characters."
 fi
 
-# --- 2. Talk to the engine ------------------------------------------------
-#
-# The superuser name is read from the container's own environment, so this
-# script never parses .env and never puts a password on a command line.
-# `engine <db>` reads its SQL from stdin. `engine_q <db> <sql>` returns one value.
 engine() {
   docker compose exec -T -e ENGINE_DB="$1" postgres sh -c \
     'exec psql -v ON_ERROR_STOP=1 --no-psqlrc --quiet --username "$POSTGRES_USER" --dbname "$ENGINE_DB"'
@@ -57,7 +34,6 @@ engine_q() {
 engine_q postgres "SELECT 1" >/dev/null 2>&1 \
   || die "cannot reach the engine. Start it with: docker compose up -d"
 
-# --- 3. Stop if the tenant already exists ---------------------------------
 if [ "$(engine_q postgres "SELECT 1 FROM pg_database WHERE datname = '$NAME'")" = "1" ]; then
   die "the database '$NAME' already exists. Nothing was changed."
 fi
@@ -65,26 +41,15 @@ if [ "$(engine_q postgres "SELECT 1 FROM pg_roles WHERE rolname = '$NAME'")" = "
   die "the role '$NAME' exists without its database. Nothing was changed."
 fi
 
-# --- 4. Generate the password ---------------------------------------------
-#
-# 32 hex characters, 128 bits. Hex on purpose: it needs no escaping in a DSN,
-# in SQL, or in a consumer's .env, so nothing downstream has to quote it.
 newpw() { od -An -tx1 -N16 /dev/urandom | tr -d ' \n'; }
 PASSWORD="$(newpw)"
 [ "$(printf %s "$PASSWORD" | wc -c)" -eq 32 ] || die "could not read 16 bytes from /dev/urandom."
 
-# --- 5. The role and the database -----------------------------------------
-#
-# CREATE DATABASE cannot run inside a transaction block, so this is its own step.
 engine postgres <<SQL
 SELECT format('CREATE ROLE %I LOGIN PASSWORD %L', '$NAME', '$PASSWORD') \gexec
 SELECT format('CREATE DATABASE %I OWNER %I', '$NAME', '$NAME') \gexec
 SQL
 
-# --- 6. The grants that keep tenants apart --------------------------------
-#
-# Postgres grants CONNECT to PUBLIC on a new database, so without this every
-# tenant role could reach every tenant database.
 engine postgres <<SQL
 BEGIN;
 SELECT format('REVOKE CONNECT ON DATABASE %I FROM PUBLIC', '$NAME') \gexec
@@ -101,7 +66,6 @@ CREATE EXTENSION IF NOT EXISTS vector;
 COMMIT;
 SQL
 
-# --- 7. The PostgREST roles, on request -----------------------------------
 API_PASSWORD=""
 if [ -n "$WITH_API" ]; then
   API_PASSWORD="$(newpw)"
@@ -138,14 +102,6 @@ COMMIT;
 SQL
 fi
 
-# --- 8. Print the DSN -----------------------------------------------------
-#
-# WITH_API prints TWO connection strings, and they are NOT interchangeable: one
-# goes through a door, the other must not. Pasting the tenant DSN where
-# PGRST_DB_URI belongs puts PostgREST behind a pooler, and nothing tells you —
-# the container starts, reports healthy, and /ready still answers 200, while the
-# LISTEN schema reload is broken. So each string says which path it takes, on
-# the line above the string itself.
 if [ -n "$SESSION" ]; then
   DOOR="engine-session"
   DOOR_NAME="SESSION door"
