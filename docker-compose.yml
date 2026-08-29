@@ -173,10 +173,16 @@ services:
     environment:
       PGADMIN_DEFAULT_EMAIL: ${PGADMIN_DEFAULT_EMAIL}
       PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_DEFAULT_PASSWORD}
-      # The repo wins at every start. Without this, pgadmin imports
-      # servers.json only into an empty volume and then ignores it forever, so
-      # the file and reality drift apart with nobody watching.
-      PGADMIN_REPLACE_SERVERS_ON_STARTUP: "True"
+      # PGADMIN_REPLACE_SERVERS_ON_STARTUP is deliberately absent. Set to
+      # "True" it runs `setup.py load-servers --replace` on every start, and
+      # --replace deletes every server row for the user before re-importing.
+      # A password saved in the browser is a column on that row, so it is
+      # deleted with it, at every redeploy. servers.json holds no password to
+      # put back — the loader reads Name, Host, Port and Username, and there
+      # is no Password key.
+      # The cost is that servers.json now seeds an empty volume only. Change
+      # the server here and nothing happens to a live pgadmin: change it in
+      # the browser too, or delete the pgadmin_data volume to re-seed.
       # The default is 80, which a uid-5050 process should not have to bind.
       # It must match loadbalancer.server.port below.
       PGADMIN_LISTEN_PORT: 5050
@@ -281,8 +287,11 @@ services:
 
 volumes:
   engine_data:
-  # Needs no backup. It holds one server definition and no password, and
-  # pgadmin rebuilds its admin account from .env on an empty volume.
+  # Needs no backup. Losing it costs one server definition and a saved
+  # password, both re-entered in a minute, and pgadmin rebuilds its admin
+  # account from .env on an empty volume. It is not empty of secrets, though:
+  # a password saved in the browser lives here, encrypted under the pgadmin
+  # login, so treat it as it deserves.
   pgadmin_data:
 
 networks:

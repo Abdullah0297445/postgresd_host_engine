@@ -238,11 +238,16 @@ stay rare, and hold nothing in the engine except tenant databases.
   this repo can be published without redaction. Never write a real domain, bucket name,
   host address, email, or account identifier into it.
 - pgadmin registers exactly **one** server, this engine, from a checked-in
-  `pgadmin/servers.json` with `PGADMIN_REPLACE_SERVERS_ON_STARTUP=True`. The repo wins at
-  every start, so a server you add by hand does not survive a restart. It logs in as the
-  engine superuser and **never saves the password**; you type it each session.
+  `pgadmin/servers.json`, seeded into an empty `pgadmin_data` volume on the first start.
+  `PGADMIN_REPLACE_SERVERS_ON_STARTUP` is deliberately **not** set: it deletes every
+  server row and re-imports at each start, and a password saved in the browser is part of
+  the row it deletes. The trade is that an edit to `servers.json` no longer reaches a
+  running pgadmin — change the server in the browser too, or delete the volume to re-seed.
+- pgadmin logs in as the engine superuser. **Save password** now holds across a redeploy,
+  which is what puts an encrypted copy of that password in the volume.
 - pgadmin is the only part of the engine the internet can reach, and it stands behind two
   locks: a traefik `basicauth` middleware on the `-secure` router, and its own login. Its
   image floats on `latest` on purpose, so security fixes arrive without review. Its volume
-  needs no backup — it holds one server definition and no password.
+  needs no backup — one server definition and a saved password, both re-entered in a
+  minute.
 - `${RESOLVER_NAME}` must match the certificate resolver the reverse proxy defines.
