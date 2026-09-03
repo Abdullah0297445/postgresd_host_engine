@@ -29,7 +29,7 @@ services:
       - "-c"
       - "log_autovacuum_min_duration=0"
     volumes:
-      - engine_data:/var/lib/postgresql
+      - postgres_data:/var/lib/postgresql
       - ./initdb:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d postgres"]
@@ -185,8 +185,10 @@ services:
       - default
 
 volumes:
-  engine_data:
+  postgres_data:
+    name: ${POSTGRES_DATA_VOLUME}
   pgadmin_data:
+    name: ${PGADMIN_DATA_VOLUME}
 
 networks:
   postgres_host_network:
