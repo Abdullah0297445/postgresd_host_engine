@@ -1,5 +1,11 @@
 # Postgres host engine
 
+> **Superseded by [userland](https://github.com/Abdullah0297445/userland)**, which runs this engine as one of its products: Postgres 18
+> with pgvector, the two doors, pgadmin and the backup.
+> This repo takes version bumps only, and will be archived. A stack already running from it
+> keeps running. userland is not a drop-in replacement: its container, network and volume
+> names differ, so moving a running stack onto it is a migration, not a `git pull`.
+
 One shared Postgres engine for every stack on a host, instead of one engine for each
 application.
 
